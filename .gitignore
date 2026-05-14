@@ -1,5 +1,4 @@
-# 私有内容，不进公开仓库
-.claude/skills/weixin-bot/
+# 本地配置，不进公开仓库
 .claude/settings.local.json
 
 # Python
