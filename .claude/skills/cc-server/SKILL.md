@@ -106,7 +106,8 @@ leaving headroom). Its logic:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/submit` | `{prompt}` → `{id}`, enqueue |
+| POST | `/submit` | `{prompt}` → `{id}`, enqueue (fire-and-forget) |
+| POST | `/submit?wait=N` | `{prompt}` → `{id,result}`, synchronous: submit and block up to N s for the answer |
 | GET  | `/poll?wait=N` | long-poll → `{request}` or `{request:null}` |
 | POST | `/reply` | `{id, result}` stores result and wakes any waiter |
 | GET  | `/result?id=X&wait=N` | get result → `{result}` or `{result:null}` |

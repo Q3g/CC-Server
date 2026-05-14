@@ -7,6 +7,43 @@ from the command line (or anything that can send HTTP), and Claude Code picks
 them up while idle, processes them, posts the result back, then waits for the
 next one.
 
+## Usage flow
+
+The order matters — the server must be running **and** a Claude Code session
+must be alive for requests to get picked up. Use two terminals:
+
+**Terminal A — start the server, then run Claude Code:**
+
+```bash
+cd /path/to/cc_server
+S=.claude/skills/cc-server/scripts/cc_server.py
+
+# 1. Start the background server (default port 8787)
+$S start
+
+# 2. Run Claude Code in this project. Once the session goes idle, its Stop
+#    hook starts long-polling the server — the session stays on standby.
+claude
+```
+
+**Terminal B — submit requests and collect results:**
+
+```bash
+cd /path/to/cc_server
+S=.claude/skills/cc-server/scripts/cc_server.py
+
+# 3. Submit a request — this prints an id
+$S send "What skills do you have?"
+#    → ✅ Request submitted (id=c85286b7e009)
+
+# 4. Fetch the result once the session in Terminal A has handled it
+$S result c85286b7e009 --wait 600
+```
+
+`$S send "..." --wait 600` can also submit and block for the reply in one step.
+When you're done, `$S stop` (from either terminal) shuts the server down and
+releases the session loop.
+
 ## Why
 
 Claude Code's Stop hook has a useful property: when the hook exits with code
@@ -61,25 +98,6 @@ cc_server/
                 └── cc_server.py         # HTTP server + CLI (pure stdlib, no deps)
 ```
 
-## Quick start
-
-```bash
-cd /path/to/cc_server
-S=.claude/skills/cc-server/scripts/cc_server.py
-
-# 1. Start the background server (default port 8787)
-$S start
-
-# 2. From another terminal, submit a request and block for Claude Code's reply
-$S send "Translate this paragraph into English: ..." --wait 600
-
-# 3. When you're done, stop the server (this also ends the session loop)
-$S stop
-```
-
-After `send`, the Claude Code session attached to this `cc_server` project will
-pick up and process the request the next time it stops.
-
 ## CLI commands
 
 | Command | Description |
@@ -114,7 +132,8 @@ The server listens on `127.0.0.1:8787` (loopback only), plain JSON:
 
 | Method | Path | Request / Response |
 |--------|------|--------------------|
-| `POST` | `/submit` | `{prompt}` → `{id}`, request queued |
+| `POST` | `/submit` | `{prompt}` → `{id}`, request queued (fire-and-forget) |
+| `POST` | `/submit?wait=N` | `{prompt}` → `{id,result}` — **synchronous**: submit and block up to N s for the answer, no separate `/result` needed |
 | `GET`  | `/poll?wait=N` | long-poll → `{request:{id,prompt,ts}}` or `{request:null}` |
 | `POST` | `/reply` | `{id,result}` → `{ok:true}`, stores result and wakes any waiter |
 | `GET`  | `/result?id=X&wait=N` | → `{result}` or `{result:null}` |
@@ -122,7 +141,9 @@ The server listens on `127.0.0.1:8787` (loopback only), plain JSON:
 | `POST` | `/shutdown` | → `{ok:true}`, graceful shutdown |
 
 So the CLI is optional — any program or script that can speak HTTP can hand
-work to the session.
+work to the session. For a one-shot request/response, a single
+`POST /submit?wait=N` is all you need (this is what `send --wait N` uses under
+the hood).
 
 ## Stop hook integration
 

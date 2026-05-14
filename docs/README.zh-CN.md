@@ -4,6 +4,40 @@
 
 把一个正在运行的 Claude Code 会话变成一个**常驻服务**:你从命令行（或任何能发 HTTP 的地方）提交请求,Claude Code 在空闲时自动取走、处理、回传结果,然后继续待命等下一个。
 
+## 使用流程
+
+顺序很关键 —— 必须 **Server 在运行**,**且有一个 Claude Code 会话活着**,请求才会被取走。用两个终端:
+
+**终端 A —— 先启动 Server,再把 Claude Code 跑起来:**
+
+```bash
+cd /path/to/cc_server
+S=.claude/skills/cc-server/scripts/cc_server.py
+
+# 1. 启动后台 Server（默认端口 8787）
+$S start
+
+# 2. 在本项目里跑 Claude Code。会话一旦空闲下来，它的 Stop hook
+#    就会开始长轮询 Server —— 会话进入待命状态。
+claude
+```
+
+**终端 B —— 提交请求、取回结果:**
+
+```bash
+cd /path/to/cc_server
+S=.claude/skills/cc-server/scripts/cc_server.py
+
+# 3. 提交一个请求 —— 会打印出一个 id
+$S send "你有哪些 skills？"
+#    → ✅ Request submitted (id=c85286b7e009)
+
+# 4. 等终端 A 的会话处理完后，取回结果
+$S result c85286b7e009 --wait 600
+```
+
+`$S send "..." --wait 600` 也可以一步完成"提交并阻塞等回复"。用完后,在任一终端 `$S stop` 关掉 Server,会话循环随之释放。
+
 ## 缘起
 
 Claude Code 自身的 Stop hook 有一个特性:hook 以 `exit 2` 退出时,会把 stderr 的内容反馈给模型并**让会话继续**,而不是真正停止。本项目把这个特性做成一个本地 HTTP 队列服务:
@@ -56,24 +90,6 @@ cc_server/
                 └── cc_server.py         # HTTP Server + CLI（纯标准库，无依赖）
 ```
 
-## 快速开始
-
-```bash
-cd /path/to/cc_server
-S=.claude/skills/cc-server/scripts/cc_server.py
-
-# 1. 启动后台 Server（默认端口 8787）
-$S start
-
-# 2. 在另一个终端提交请求，并阻塞等待 Claude Code 的回复
-$S send "帮我把这段话翻译成英文：..." --wait 600
-
-# 3. 不想用了，停掉 Server（同时结束会话轮询循环）
-$S stop
-```
-
-`send` 之后,当前这个挂着 cc_server 项目的 Claude Code 会话只要一停下来,就会通过 Stop hook 取走请求并处理。
-
 ## CLI 命令
 
 | 命令 | 说明 |
@@ -108,14 +124,15 @@ Server 监听 `127.0.0.1:8787`(仅本机),纯 JSON:
 
 | 方法 | 路径 | 请求 / 响应 |
 |------|------|-------------|
-| `POST` | `/submit` | `{prompt}` → `{id}`,请求入队 |
+| `POST` | `/submit` | `{prompt}` → `{id}`,请求入队（提交后即返回） |
+| `POST` | `/submit?wait=N` | `{prompt}` → `{id,result}` —— **同步**:提交并阻塞最多 N 秒直接拿到答案,不用再走 `/result` |
 | `GET`  | `/poll?wait=N` | 长轮询 → `{request:{id,prompt,ts}}` 或 `{request:null}` |
 | `POST` | `/reply` | `{id,result}` → `{ok:true}`,存结果并唤醒等待方 |
 | `GET`  | `/result?id=X&wait=N` | → `{result}` 或 `{result:null}` |
 | `GET`  | `/status` | → `{ok,pid,queued,pending_results}` |
 | `POST` | `/shutdown` | → `{ok:true}`,优雅关闭 |
 
-所以不依赖 CLI 也行,任何能发 HTTP 的程序/脚本都能往会话里塞任务。
+所以不依赖 CLI 也行,任何能发 HTTP 的程序/脚本都能往会话里塞任务。要"一问一答"式的同步调用,一个 `POST /submit?wait=N` 就够了(`send --wait N` 内部就是走的它)。
 
 ## Stop Hook 集成
 

@@ -143,6 +143,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
+        q = parse_qs(u.query)
 
         if u.path == "/submit":
             data = self._read_json()
@@ -150,16 +151,29 @@ class Handler(BaseHTTPRequestHandler):
             if not prompt:
                 self._send(400, {"error": "empty prompt"})
                 return
+            # ?wait=N makes /submit synchronous: enqueue, then block for the
+            # result and return it in the same response — no separate /result.
+            wait = min(int((q.get("wait") or ["0"])[0]), 3600)
             rid = uuid.uuid4().hex[:12]
             item = {
                 "id": rid,
                 "prompt": prompt,
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             }
+            ev = threading.Event()
             with STATE_LOCK:
-                RESULT_EVENTS[rid] = threading.Event()
+                RESULT_EVENTS[rid] = ev
             REQUESTS.put(item)
-            self._send(200, {"id": rid})
+            if wait <= 0:
+                self._send(200, {"id": rid})
+                return
+            if ev.wait(timeout=wait):
+                with STATE_LOCK:
+                    res = RESULTS.pop(rid, None)
+                    RESULT_EVENTS.pop(rid, None)
+                self._send(200, {"id": rid, "result": res})
+            else:
+                self._send(200, {"id": rid, "result": None})
 
         elif u.path == "/reply":
             data = self._read_json()
@@ -216,7 +230,7 @@ def _ping(port: int) -> bool:
         return False
 
 
-def _post(path: str, payload: dict) -> dict:
+def _post(path: str, payload: dict, timeout: int = 15) -> dict:
     host, port = server_addr()
     body = json.dumps(payload, ensure_ascii=False).encode()
     req = urllib.request.Request(
@@ -224,7 +238,7 @@ def _post(path: str, payload: dict) -> dict:
         headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         try:
@@ -334,26 +348,24 @@ def cmd_send(prompt: str, wait: int):
     if not is_running():
         print("CC Server is not running, start it first: cc_server.py start", file=sys.stderr)
         sys.exit(1)
-    resp = _post("/submit", {"prompt": prompt})
+    # wait > 0 uses the synchronous /submit?wait=N — one round trip, no /result.
+    if wait <= 0:
+        resp = _post("/submit", {"prompt": prompt})
+        rid = resp.get("id")
+        if not rid:
+            print(f"Submit failed: {resp}", file=sys.stderr)
+            sys.exit(1)
+        print(f"✅ Request submitted (id={rid})")
+        print(f"   query the reply: cc_server.py result {rid} --wait 600")
+        return
+    print(f"Waiting for Claude Code to reply (up to {wait}s)...")
+    resp = _post(f"/submit?wait={wait}", {"prompt": prompt}, timeout=wait + 10)
     rid = resp.get("id")
     if not rid:
         print(f"Submit failed: {resp}", file=sys.stderr)
         sys.exit(1)
     print(f"✅ Request submitted (id={rid})")
-    if wait <= 0:
-        print(f"   query the reply: cc_server.py result {rid} --wait 600")
-        return
-    print(f"Waiting for Claude Code to reply (up to {wait}s)...")
-    host, port = server_addr()
-    try:
-        with urllib.request.urlopen(
-            f"http://{host}:{port}/result?id={rid}&wait={wait}", timeout=wait + 10
-        ) as r:
-            data = json.loads(r.read())
-    except Exception as e:
-        print(f"Failed while waiting for the reply: {e}", file=sys.stderr)
-        sys.exit(1)
-    result = data.get("result")
+    result = resp.get("result")
     if result is None:
         print(f"⏱  Timed out, no reply yet. Query later: cc_server.py result {rid} --wait 600")
         sys.exit(2)
