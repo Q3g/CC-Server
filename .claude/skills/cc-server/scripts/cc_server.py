@@ -269,7 +269,7 @@ def cmd_serve(port: int):
 
 def cmd_start(port: int):
     if is_running():
-        print(f"CC Server 已在运行 (pid {PID_FILE.read_text().strip()})")
+        print(f"CC Server already running (pid {PID_FILE.read_text().strip()})")
         return
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _cleanup_files()  # clear stale pid/port from a crashed run
@@ -281,31 +281,31 @@ def cmd_start(port: int):
     for _ in range(50):
         time.sleep(0.1)
         if _ping(port):
-            print(f"✅ CC Server 已启动: http://{HOST}:{port} (pid {proc.pid})")
-            print(f"   日志: {LOG_FILE}")
-            print("   停止: cc_server.py stop")
+            print(f"✅ CC Server started: http://{HOST}:{port} (pid {proc.pid})")
+            print(f"   log:  {LOG_FILE}")
+            print("   stop: cc_server.py stop")
             return
-    print(f"❌ CC Server 启动失败，查看日志: {LOG_FILE}", file=sys.stderr)
+    print(f"❌ CC Server failed to start, check the log: {LOG_FILE}", file=sys.stderr)
     sys.exit(1)
 
 
 def cmd_stop():
     if not is_running():
-        print("CC Server 未运行")
+        print("CC Server is not running")
         _cleanup_files()
         return
     pid = int(PID_FILE.read_text().strip())
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError as e:
-        print(f"停止失败: {e}", file=sys.stderr)
+        print(f"Failed to stop: {e}", file=sys.stderr)
         sys.exit(1)
     for _ in range(30):
         time.sleep(0.1)
         if not is_running():
-            print("✅ CC Server 已停止")
+            print("✅ CC Server stopped")
             return
-    print("⚠️  CC Server 未在预期时间内停止", file=sys.stderr)
+    print("⚠️  CC Server did not stop within the expected time", file=sys.stderr)
     sys.exit(1)
 
 
@@ -314,36 +314,36 @@ def cmd_status(quiet: bool):
     if quiet:
         sys.exit(0 if running else 1)
     if not running:
-        print("CC Server: 未运行")
+        print("CC Server: not running")
         return
     host, port = server_addr()
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/status", timeout=3) as r:
             info = json.loads(r.read())
-        print(f"CC Server: 运行中 (pid {info['pid']}, http://{host}:{port})")
-        print(f"  队列中待处理请求: {info['queued']}")
-        print(f"  等待回复的请求:   {info['pending_results']}")
+        print(f"CC Server: running (pid {info['pid']}, http://{host}:{port})")
+        print(f"  queued requests:        {info['queued']}")
+        print(f"  requests awaiting reply: {info['pending_results']}")
     except Exception as e:
-        print(f"CC Server: 进程存在但无法连接 ({e})")
+        print(f"CC Server: process exists but is unreachable ({e})")
 
 
 def cmd_send(prompt: str, wait: int):
     if not prompt.strip():
-        print("请求内容为空", file=sys.stderr)
+        print("Request body is empty", file=sys.stderr)
         sys.exit(1)
     if not is_running():
-        print("CC Server 未运行，请先: cc_server.py start", file=sys.stderr)
+        print("CC Server is not running, start it first: cc_server.py start", file=sys.stderr)
         sys.exit(1)
     resp = _post("/submit", {"prompt": prompt})
     rid = resp.get("id")
     if not rid:
-        print(f"提交失败: {resp}", file=sys.stderr)
+        print(f"Submit failed: {resp}", file=sys.stderr)
         sys.exit(1)
-    print(f"✅ 已提交请求 (id={rid})")
+    print(f"✅ Request submitted (id={rid})")
     if wait <= 0:
-        print(f"   查询回复: cc_server.py result {rid} --wait 600")
+        print(f"   query the reply: cc_server.py result {rid} --wait 600")
         return
-    print(f"等待 Claude Code 处理回复 (最多 {wait}s)...")
+    print(f"Waiting for Claude Code to reply (up to {wait}s)...")
     host, port = server_addr()
     try:
         with urllib.request.urlopen(
@@ -351,13 +351,13 @@ def cmd_send(prompt: str, wait: int):
         ) as r:
             data = json.loads(r.read())
     except Exception as e:
-        print(f"等待回复失败: {e}", file=sys.stderr)
+        print(f"Failed while waiting for the reply: {e}", file=sys.stderr)
         sys.exit(1)
     result = data.get("result")
     if result is None:
-        print(f"⏱  超时，暂无回复。稍后查询: cc_server.py result {rid} --wait 600")
+        print(f"⏱  Timed out, no reply yet. Query later: cc_server.py result {rid} --wait 600")
         sys.exit(2)
-    print("\n--- Claude Code 回复 ---")
+    print("\n--- Claude Code reply ---")
     print(result)
 
 
@@ -376,31 +376,31 @@ def cmd_poll(wait: int):
     req = data.get("request")
     if not req:
         return
-    print(f"[CC Server] 收到新请求 (id={req['id']}, ts={req['ts']}):")
+    print(f"[CC Server] New request received (id={req['id']}, ts={req['ts']}):")
     print()
     print(req["prompt"])
     print()
-    print("处理完上述请求后，运行以下命令把结果回传给提交方：")
+    print("After handling the request above, run this to send the result back:")
     print(f"  {SCRIPT_PATH} reply {req['id']} --stdin <<'EOF'")
-    print("  <你的回复内容>")
+    print("  <your reply>")
     print("  EOF")
 
 
 def cmd_reply(rid: str, result: str):
     if not is_running():
-        print("CC Server 未运行", file=sys.stderr)
+        print("CC Server is not running", file=sys.stderr)
         sys.exit(1)
     resp = _post("/reply", {"id": rid, "result": result})
     if resp.get("ok"):
-        print(f"✅ 已回传结果 (id={rid})")
+        print(f"✅ Result sent back (id={rid})")
     else:
-        print(f"回传失败: {resp}", file=sys.stderr)
+        print(f"Failed to send result back: {resp}", file=sys.stderr)
         sys.exit(1)
 
 
 def cmd_result(rid: str, wait: int):
     if not is_running():
-        print("CC Server 未运行", file=sys.stderr)
+        print("CC Server is not running", file=sys.stderr)
         sys.exit(1)
     host, port = server_addr()
     try:
@@ -410,16 +410,16 @@ def cmd_result(rid: str, wait: int):
             data = json.loads(r.read())
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            print(f"未知请求 id: {rid}", file=sys.stderr)
+            print(f"Unknown request id: {rid}", file=sys.stderr)
         else:
-            print(f"查询失败: HTTP {e.code}", file=sys.stderr)
+            print(f"Query failed: HTTP {e.code}", file=sys.stderr)
         sys.exit(1)
     except Exception as e:
-        print(f"查询失败: {e}", file=sys.stderr)
+        print(f"Query failed: {e}", file=sys.stderr)
         sys.exit(1)
     result = data.get("result")
     if result is None:
-        print("暂无回复")
+        print("No reply yet")
         sys.exit(2)
     print(result)
 
@@ -431,33 +431,33 @@ def main():
     parser = argparse.ArgumentParser(description="CC Server — HTTP request queue for Claude Code session loops")
     sub = parser.add_subparsers(dest="command")
 
-    start_p = sub.add_parser("start", help="启动后台 Server")
+    start_p = sub.add_parser("start", help="start the background server")
     start_p.add_argument("--port", type=int, default=DEFAULT_PORT)
 
-    serve_p = sub.add_parser("serve", help="前台运行 Server（由 start 调用）")
+    serve_p = sub.add_parser("serve", help="run the server in the foreground (called by start)")
     serve_p.add_argument("--port", type=int, default=DEFAULT_PORT)
 
-    sub.add_parser("stop", help="停止 Server")
+    sub.add_parser("stop", help="stop the server")
 
-    status_p = sub.add_parser("status", help="查看 Server 状态")
-    status_p.add_argument("--quiet", "-q", action="store_true", help="不输出，仅用退出码表示是否运行")
+    status_p = sub.add_parser("status", help="show server status")
+    status_p.add_argument("--quiet", "-q", action="store_true", help="print nothing, only set the exit code")
 
-    send_p = sub.add_parser("send", help="向 Server 提交一个请求")
-    send_p.add_argument("prompt", nargs="?", default=None, help="请求内容")
-    send_p.add_argument("--stdin", action="store_true", help="从 stdin 读取请求内容")
-    send_p.add_argument("--wait", "-w", type=int, default=0, help="阻塞等待回复的最长秒数（0=不等待）")
+    send_p = sub.add_parser("send", help="submit a request to the server")
+    send_p.add_argument("prompt", nargs="?", default=None, help="request body")
+    send_p.add_argument("--stdin", action="store_true", help="read the request body from stdin")
+    send_p.add_argument("--wait", "-w", type=int, default=0, help="max seconds to block for the reply (0 = don't wait)")
 
-    poll_p = sub.add_parser("poll", help="长轮询一个请求（由 Stop hook 调用）")
-    poll_p.add_argument("--wait", "-w", type=int, default=840, help="长轮询最长秒数")
+    poll_p = sub.add_parser("poll", help="long-poll for one request (called by the Stop hook)")
+    poll_p.add_argument("--wait", "-w", type=int, default=840, help="max long-poll seconds")
 
-    reply_p = sub.add_parser("reply", help="回传某个请求的处理结果")
-    reply_p.add_argument("id", help="请求 id")
-    reply_p.add_argument("result", nargs="?", default=None, help="结果内容")
-    reply_p.add_argument("--stdin", action="store_true", help="从 stdin 读取结果内容")
+    reply_p = sub.add_parser("reply", help="post the result for a request")
+    reply_p.add_argument("id", help="request id")
+    reply_p.add_argument("result", nargs="?", default=None, help="result body")
+    reply_p.add_argument("--stdin", action="store_true", help="read the result body from stdin")
 
-    result_p = sub.add_parser("result", help="查询某个请求的处理结果")
-    result_p.add_argument("id", help="请求 id")
-    result_p.add_argument("--wait", "-w", type=int, default=0, help="阻塞等待的最长秒数")
+    result_p = sub.add_parser("result", help="query the result for a request")
+    result_p.add_argument("id", help="request id")
+    result_p.add_argument("--wait", "-w", type=int, default=0, help="max seconds to block")
 
     args = parser.parse_args()
 
@@ -475,7 +475,7 @@ def main():
         elif args.prompt:
             prompt = args.prompt
         else:
-            print("请提供请求内容: send <prompt> 或 send --stdin", file=sys.stderr)
+            print("Provide a request body: send <prompt> or send --stdin", file=sys.stderr)
             sys.exit(1)
         cmd_send(prompt, args.wait)
     elif args.command == "poll":
@@ -486,7 +486,7 @@ def main():
         elif args.result is not None:
             result = args.result
         else:
-            print("请提供结果内容: reply <id> <result> 或 reply <id> --stdin", file=sys.stderr)
+            print("Provide a result body: reply <id> <result> or reply <id> --stdin", file=sys.stderr)
             sys.exit(1)
         cmd_reply(args.id, result)
     elif args.command == "result":

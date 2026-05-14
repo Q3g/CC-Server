@@ -23,5 +23,5 @@ if [ -n "$OUT" ]; then
 fi
 
 # Timeout with no request — keep the polling loop alive.
-echo "[CC Server] 无新请求，继续轮询中…" >&2
+echo "[CC Server] No new request, still polling…" >&2
 exit 2
