@@ -1,0 +1,10 @@
+# 私有内容，不进公开仓库
+.claude/skills/weixin-bot/
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
